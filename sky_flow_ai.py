@@ -4,6 +4,7 @@ from operator import itemgetter
 import csv
 from pathlib import Path
 
+# -------------------- Environment --------------------
 # Load .env
 from dotenv import load_dotenv
 load_dotenv()
@@ -28,7 +29,7 @@ def _get_model_name() -> str:
 API_KEY = _get_api_key()
 MODEL_NAME = _get_model_name()
 
-# LangChain / NVIDIA
+# -------------------- LangChain / NVIDIA --------------------
 from pydantic import BaseModel, Field
 from langchain.output_parsers import PydanticOutputParser
 from langchain.schema.runnable.passthrough import RunnableAssign
@@ -38,10 +39,10 @@ from langchain_nvidia_ai_endpoints import ChatNVIDIA
 from langchain_core.output_parsers import StrOutputParser
 
 
+# -------------------- Knowledge Base --------------------
 class KnowledgeBase(BaseModel):
     first_name: str = Field("unknown", description="User first name, 'unknown' if unknown")
     last_name: str = Field("unknown", description="User last name, 'unknown' if unknown")
-    # Passenger_ID مثل P42 لذلك نخليه نصي
     confirmation: Optional[str] = Field(
         None,
         description="Passenger / booking ID (e.g. 'P42'); None if unknown",
@@ -51,13 +52,10 @@ class KnowledgeBase(BaseModel):
     current_goals: str = Field("", description="Current user goal")
 
 
-# ---------- Flight "database" loaded from synthetic_flight_passenger_data.csv ----------
-
+# -------------------- Flight database (CSV) --------------------
 BASE_DIR = Path(__file__).resolve().parent
-# تأكد أن اسم الملف يطابق اسم ملف الـ CSV عندك
 FLIGHTS_CSV_PATH = BASE_DIR / "synthetic_flight_passenger_data.csv"
 
-# هذا هو عمود رقم الحجز في الملف
 PASSENGER_ID_COL = "Passenger_ID"
 
 
@@ -77,7 +75,6 @@ def _load_flight_db(csv_path: Path) -> dict[str, dict]:
         if not reader.fieldnames:
             raise RuntimeError(f"{csv_path.name} has no header row.")
 
-        # تأكد أن Passenger_ID موجود في الهيدر
         if PASSENGER_ID_COL not in reader.fieldnames:
             raise RuntimeError(
                 f"Expected column '{PASSENGER_ID_COL}' in {csv_path.name}, "
@@ -98,6 +95,7 @@ def _load_flight_db(csv_path: Path) -> dict[str, dict]:
 FLIGHT_DB = _load_flight_db(FLIGHTS_CSV_PATH)
 
 
+# -------------------- Extractor helpers --------------------
 def RExtract(pydantic_class: type[BaseModel], llm, prompt) -> RunnableLambda:
     parser = PydanticOutputParser(pydantic_object=pydantic_class)
     instruct_merge = RunnableAssign({"format_instructions": lambda x: parser.get_format_instructions()})
@@ -128,6 +126,7 @@ def get_key_fn(base: KnowledgeBase) -> dict:
 get_key = RunnableLambda(get_key_fn)
 
 
+# -------------------- Flight lookup --------------------
 def get_user_info(user_data: dict) -> str:
     """
     Lookup flight info from FLIGHT_DB based on confirmation (Passenger_ID).
@@ -143,7 +142,6 @@ def get_user_info(user_data: dict) -> str:
         )
 
     conf_raw = user_data.get("confirmation")
-    # نتعامل معها case-insensitive: p42 -> P42
     conf = str(conf_raw).strip().upper() if conf_raw is not None else ""
 
     if not conf:
@@ -160,7 +158,7 @@ def get_user_info(user_data: dict) -> str:
             "If it's important, ask them to double-check their confirmation number."
         )
 
-    # أعمدة الملف كما في الهيدر:
+    # CSV columns (reference):
     # Passenger_ID,Flight_ID,Airline,Departure_Airport,Arrival_Airport,
     # Departure_Time,Flight_Duration_Minutes,Flight_Status,Distance_Miles,
     # Price_USD,Age,Gender,Income_Level,Travel_Purpose,Seat_Class,Bags_Checked,
@@ -188,7 +186,6 @@ def get_user_info(user_data: dict) -> str:
     check_in_part = f" Check-in method: {check_in_method}." if check_in_method else ""
     ff_part = f" Frequent flyer status: {ff_status}." if ff_status else ""
 
-    # الاسم نأخذه من الـ KnowledgeBase فقط (لأن الملف لا يحتوي على أعمدة اسم)
     kb_first = user_data.get("first_name") or "Passenger"
     kb_last = user_data.get("last_name") or ""
     full_name = f"{kb_first} {kb_last}".strip()
@@ -200,6 +197,7 @@ def get_user_info(user_data: dict) -> str:
     )
 
 
+# -------------------- Prompts --------------------
 external_prompt = ChatPromptTemplate.from_messages(
     [
         (
@@ -229,6 +227,7 @@ parser_prompt = ChatPromptTemplate.from_template(
 )
 
 
+# -------------------- LLM setup --------------------
 def make_llm(model: str, temperature: float = 0.2):
     return ChatNVIDIA(model=model, api_key=API_KEY, temperature=temperature)
 
@@ -248,6 +247,7 @@ internal_chain = (
 state = {"know_base": KnowledgeBase()}
 
 
+# -------------------- Chat loop --------------------
 def chat_gen(message: str, history=None, return_buffer=True):
     global state
     history = history or []
@@ -290,5 +290,6 @@ def run_console(max_turns=100):
         print("\n")
 
 
+# -------------------- Entrypoint --------------------
 if __name__ == "__main__":
     run_console()
