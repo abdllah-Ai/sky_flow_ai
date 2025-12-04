@@ -1,0 +1,22 @@
+# Python venv
+.venv/
+venv/
+env/
+
+# Byte-compiled / cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Environment variables
+.env
+
+# IDE & misc
+.vscode/
+.idea/
+.DS_Store
+
+# Kaggle / cache
+.kaggle/
+.cache/
